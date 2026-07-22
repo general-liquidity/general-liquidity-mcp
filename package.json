@@ -1,0 +1,28 @@
+{
+  "name": "@general-liquidity/mcp",
+  "version": "0.1.0",
+  "description": "A curated MCP server exposing the General Liquidity surface as four task-shaped tools (resolve, pay, verify, disclose) over an injected client.",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/general-liquidity/general-liquidity-mcp"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "!src/**/*.test.ts"
+  ],
+  "dependencies": {
+    "@general-liquidity/sdk": "github:general-liquidity/general-liquidity-typescript",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.5",
+    "@types/bun": "^1.3.14",
+    "typescript": "^7.0.2"
+  }
+}

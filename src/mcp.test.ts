@@ -45,6 +45,33 @@ function fakeClient(): { client: GeneralLiquidity; calls: Calls } {
         signature: { algorithm: "ed25519", publicKey: "gl", value: "sig" },
       } as Disclosure;
     },
+    // Agent read surface: not exercised by the MCP tool tests, stubbed to satisfy the
+    // GeneralLiquidity contract.
+    async getJob(id) {
+      return {
+        id,
+        status: "settled",
+        createdAt: "2026-01-01T00:00:00Z",
+        outcome: "allow",
+        links: { self: `/intents/${id}`, events: `/intents/${id}/events` },
+      };
+    },
+    async getJobEvents() {
+      return { data: [], hasMore: false, nextCursor: null };
+    },
+    async getAudit() {
+      return { data: [], hasMore: false, nextCursor: null };
+    },
+    async getUsage(query) {
+      return {
+        keyId: "key-1",
+        since: query.since,
+        until: query.until,
+        total: 0,
+        byOperation: {},
+        byOutcome: {},
+      };
+    },
   };
   return { client, calls };
 }

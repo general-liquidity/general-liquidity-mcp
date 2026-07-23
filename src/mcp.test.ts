@@ -40,7 +40,10 @@ function fakeClient(): { client: GeneralLiquidity; calls: Calls } {
     },
     async disclose() {
       calls.disclose += 1;
-      return { agentId: "gl", document: {}, signature: "sig" } as Disclosure;
+      return {
+        document: {},
+        signature: { algorithm: "ed25519", publicKey: "gl", value: "sig" },
+      } as Disclosure;
     },
   };
   return { client, calls };
@@ -105,10 +108,13 @@ describe("curated tool surface", () => {
     const { client, calls } = fakeClient();
     const verify = buildTools(client).find((t) => t.name === "verify")!;
     const res = await verify.handler({
-      disclosure: { agent_id: "cp", document: { role: "merchant" }, signature: "s" },
+      disclosure: {
+        document: { role: "merchant" },
+        signature: { algorithm: "ed25519", public_key: "cp", value: "s" },
+      },
     } as never);
     expect(calls.verify).toHaveLength(1);
-    expect(calls.verify[0]!.agentId).toBe("cp");
+    expect(calls.verify[0]!.signature.publicKey).toBe("cp");
     expect(res.structuredContent).toBeDefined();
   });
 

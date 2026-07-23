@@ -68,10 +68,22 @@ const intentShape = z.object({
   envelope: envelopeShape,
 });
 
-const disclosureShape = z.object({
-  agent_id: z.string(),
-  document: z.record(z.string(), z.unknown()),
+const keyRotationStatementShape = z.object({
+  type: z.literal("rotation"),
+  from: z.string(),
+  to: z.string(),
+  rotated_at: z.string(),
   signature: z.string(),
+});
+
+const disclosureShape = z.object({
+  document: z.record(z.string(), z.unknown()),
+  signature: z.object({
+    algorithm: z.literal("ed25519"),
+    public_key: z.string(),
+    value: z.string(),
+  }),
+  rotation_chain: z.array(keyRotationStatementShape).optional(),
 });
 
 type WireIntent = z.infer<typeof intentShape>;
@@ -108,9 +120,23 @@ function toIntent(wire: WireIntent): Intent {
 
 function toDisclosure(wire: WireDisclosure): Disclosure {
   return {
-    agentId: wire.agent_id,
     document: wire.document,
-    signature: wire.signature,
+    signature: {
+      algorithm: wire.signature.algorithm,
+      publicKey: wire.signature.public_key,
+      value: wire.signature.value,
+    },
+    ...(wire.rotation_chain
+      ? {
+          rotationChain: wire.rotation_chain.map((r) => ({
+            type: r.type,
+            from: r.from,
+            to: r.to,
+            rotatedAt: r.rotated_at,
+            signature: r.signature,
+          })),
+        }
+      : {}),
   };
 }
 

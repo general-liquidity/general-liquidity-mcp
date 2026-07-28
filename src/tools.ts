@@ -1,9 +1,11 @@
 // The curated projection. Four task-shaped verbs — resolve · pay · verify · disclose —
 // mapped 1:1 onto the @general-liquidity/sdk `GeneralLiquidity` methods. This is a
-// coarse-grained surface, NOT a dump of every internal operation. Wire params are
-// snake_case (OpenAPI boundary); the surface takes camelCase, so each handler maps at the
-// seam. Signing/settlement stay behind the injected client — the MCP layer never fabricates
-// a settle primitive.
+// coarse-grained surface, NOT a dump of every internal operation. Tool params are
+// snake_case and the surface takes camelCase, so each handler maps at the seam. That
+// snake_case is an LLM tool-input vocabulary, NOT the wire: the wire is camelCase, and this
+// mapping exists only because these names are what a model is prompted with. Nothing here
+// reaches the HTTP boundary, which the client crosses unrenamed. Signing/settlement stay
+// behind the injected client, so the MCP layer never fabricates a settle primitive.
 
 import type { Disclosure, GeneralLiquidity, Intent } from "@general-liquidity/sdk";
 import { z } from "zod";

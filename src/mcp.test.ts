@@ -119,7 +119,7 @@ describe("curated tool surface", () => {
     expect(res.content[0]!.text).toContain("caip:eip155:1:0x1");
   });
 
-  test("pay maps snake_case wire → canonical Intent and delegates", async () => {
+  test("pay maps the snake_case tool input to a canonical Intent and delegates", async () => {
     const { client, calls } = fakeClient();
     const pay = buildTools(client).find((t) => t.name === "pay")!;
     await pay.handler({ intent: wireIntent } as never);

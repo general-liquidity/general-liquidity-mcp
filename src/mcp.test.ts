@@ -1,25 +1,58 @@
 import { describe, expect, test } from "bun:test";
 import type {
+  AssembleRequest,
   Counterparty,
   Decision,
   Disclosure,
   GeneralLiquidity,
   Intent,
+  PageQuery,
+  RecallRequest,
   Receipt,
+  RememberRequest,
+  UsageQuery,
 } from "@general-liquidity/sdk";
-import { buildTools, createMcpServer, TOOL_NAMES } from "./index.ts";
+import {
+  ALL_TOOL_NAMES,
+  buildTools,
+  createMcpServer,
+  MEMORY_TOOL_NAMES,
+  READ_TOOL_NAMES,
+  TOOL_NAMES,
+} from "./index.ts";
 
 interface Calls {
   resolve: string[];
   pay: Intent[];
   verify: Disclosure[];
   disclose: number;
+  memoryRemember: RememberRequest[];
+  memoryRecall: Array<{ req: RecallRequest; page: PageQuery }>;
+  memoryAssemble: AssembleRequest[];
+  memoryVerify: unknown[];
+  getJob: string[];
+  getJobEvents: Array<{ id: string; query: PageQuery }>;
+  getAudit: PageQuery[];
+  getUsage: UsageQuery[];
 }
 
 const ALLOW: Decision = { outcome: "allow", reasons: [], mandateId: "m1" };
 
 function fakeClient(decision: Decision = ALLOW): { client: GeneralLiquidity; calls: Calls } {
-  const calls: Calls = { resolve: [], pay: [], verify: [], disclose: 0 };
+  const calls: Calls = {
+    resolve: [],
+    pay: [],
+    verify: [],
+    disclose: 0,
+    memoryRemember: [],
+    memoryRecall: [],
+    memoryAssemble: [],
+    memoryVerify: [],
+    getJob: [],
+    getJobEvents: [],
+    getAudit: [],
+    getUsage: [],
+  };
   const client: GeneralLiquidity = {
     async resolve(ref) {
       calls.resolve.push(ref);
@@ -47,9 +80,8 @@ function fakeClient(decision: Decision = ALLOW): { client: GeneralLiquidity; cal
         signature: { algorithm: "ed25519", publicKey: "gl", value: "sig" },
       } as Disclosure;
     },
-    // Agent read surface: not exercised by the MCP tool tests, stubbed to satisfy the
-    // GeneralLiquidity contract.
     async getJob(id) {
+      calls.getJob.push(id);
       return {
         id,
         status: "settled",
@@ -58,13 +90,16 @@ function fakeClient(decision: Decision = ALLOW): { client: GeneralLiquidity; cal
         links: { self: `/intents/${id}`, events: `/intents/${id}/events` },
       };
     },
-    async getJobEvents() {
+    async getJobEvents(id, query = {}) {
+      calls.getJobEvents.push({ id, query });
       return { data: [], hasMore: false, nextCursor: null };
     },
-    async getAudit() {
+    async getAudit(query = {}) {
+      calls.getAudit.push(query);
       return { data: [], hasMore: false, nextCursor: null };
     },
     async getUsage(query) {
+      calls.getUsage.push(query);
       return {
         keyId: "key-1",
         since: query.since,
@@ -74,19 +109,44 @@ function fakeClient(decision: Decision = ALLOW): { client: GeneralLiquidity; cal
         byOutcome: {},
       };
     },
-    // The memory half of the client. This server projects none of it as a tool,
-    // but the fake has to satisfy the interface or the type drifts silently.
-    async memoryRemember() {
-      throw new Error("not used by the MCP surface");
+    async memoryRemember(req) {
+      calls.memoryRemember.push(req);
+      return {
+        id: "rec-1",
+        body: req.body,
+        validFrom: req.validFrom,
+        validTo: req.validTo,
+        recordedAt: "2026-01-01T00:00:00Z",
+        invalidatedAt: null,
+        edges: req.edges ?? [],
+        taint: false,
+        source: req.source,
+      };
     },
-    async memoryRecall() {
-      throw new Error("not used by the MCP surface");
+    async memoryRecall(req, page = {}) {
+      calls.memoryRecall.push({ req, page });
+      return {
+        data: [],
+        hasMore: false,
+        nextCursor: null,
+        validAt: req.validAt,
+        txAt: req.txAt,
+        seal: { hash: "h", signature: "s" },
+      };
     },
-    async memoryAssemble() {
-      throw new Error("not used by the MCP surface");
+    async memoryAssemble(req) {
+      calls.memoryAssemble.push(req);
+      return {
+        records: [],
+        order: [],
+        budget: req.budget,
+        abstained: false,
+        seal: { hash: "h", signature: "s" },
+      };
     },
-    async memoryVerify() {
-      throw new Error("not used by the MCP surface");
+    async memoryVerify(artifact) {
+      calls.memoryVerify.push(artifact);
+      return { valid: true };
     },
   };
   return { client, calls };
@@ -119,12 +179,35 @@ const wireIntent = {
 };
 
 describe("curated tool surface", () => {
-  test("registers exactly the four curated verbs", () => {
+  test("registers exactly the curated groups, in order", () => {
     const { client } = fakeClient();
     const names = buildTools(client).map((t) => t.name);
-    expect(names).toEqual([...TOOL_NAMES]);
+    expect(names).toEqual([...ALL_TOOL_NAMES]);
+    expect(ALL_TOOL_NAMES).toEqual([
+      ...TOOL_NAMES,
+      ...MEMORY_TOOL_NAMES,
+      ...READ_TOOL_NAMES,
+    ] as never);
     expect(names).not.toContain("settle");
     expect(names).not.toContain("grant");
+  });
+
+  test("no operator verb is reachable from the agent surface", () => {
+    const { client } = fakeClient();
+    const names = buildTools(client).map((t) => t.name);
+    // Approve / refund / kill switch / erasure live in the disjoint `GL-Operator`
+    // credential domain the injected agent client cannot mint. An agent that could
+    // approve its own parked payment would make the gate decorative.
+    for (const operatorVerb of [
+      "approve",
+      "refund",
+      "kill_switch",
+      "memory_forget",
+      "forget",
+      "webhook_create",
+    ]) {
+      expect(names).not.toContain(operatorVerb);
+    }
   });
 
   test("resolve delegates the ref to the injected client", async () => {
@@ -199,5 +282,249 @@ describe("curated tool surface", () => {
     const server = createMcpServer(client, { name: "test", version: "1.2.3" });
     expect(server).toBeDefined();
     expect(typeof server.connect).toBe("function");
+  });
+
+  test("success results keep the untouched `result` shape and no isError", async () => {
+    const { client } = fakeClient();
+    const pay = buildTools(client).find((t) => t.name === "pay")!;
+    const res = await pay.handler({ intent: wireIntent } as never);
+    expect(res.isError).toBeUndefined();
+    expect((res.structuredContent as { result: Receipt }).result.reference).toBe("0xabc");
+  });
+});
+
+const wireMandate = {
+  namespace: "ops",
+  can_read: true,
+  can_write: true,
+  can_erase: false,
+  as_of_floor: "2026-01-01T00:00:00Z",
+};
+
+function tool(client: GeneralLiquidity, name: string) {
+  return buildTools(client).find((t) => t.name === name)!;
+}
+
+describe("memory verbs", () => {
+  test("memory_remember maps the snake_case mandate and record onto the client", async () => {
+    const { client, calls } = fakeClient();
+    const res = await tool(client, "memory_remember").handler({
+      mandate: wireMandate,
+      body: { note: "counterparty prefers x402" },
+      valid_from: "2026-02-01T00:00:00Z",
+      valid_to: null,
+      edges: [{ relation: "about", to: "rec-0" }],
+      source: "agent",
+    } as never);
+
+    expect(res.isError).toBeUndefined();
+    expect(calls.memoryRemember).toHaveLength(1);
+    const req = calls.memoryRemember[0]!;
+    expect(req.mandate).toEqual({
+      namespace: "ops",
+      canRead: true,
+      canWrite: true,
+      canErase: false,
+      asOfFloor: "2026-01-01T00:00:00Z",
+    });
+    expect(req.validFrom).toBe("2026-02-01T00:00:00Z");
+    expect(req.validTo).toBeNull();
+    expect(req.edges).toEqual([{ relation: "about", to: "rec-0" }]);
+    expect(req.source).toBe("agent");
+  });
+
+  test("memory_recall sends pagination beside the sealed request, not inside it", async () => {
+    const { client, calls } = fakeClient();
+    await tool(client, "memory_recall").handler({
+      mandate: wireMandate,
+      valid_at: "2026-02-01T00:00:00Z",
+      tx_at: "2026-02-02T00:00:00Z",
+      namespace: "ops",
+      cursor: "c1",
+      limit: 25,
+    } as never);
+
+    const { req, page } = calls.memoryRecall[0]!;
+    expect(req.validAt).toBe("2026-02-01T00:00:00Z");
+    expect(req.txAt).toBe("2026-02-02T00:00:00Z");
+    expect(req.namespace).toBe("ops");
+    expect(page).toEqual({ cursor: "c1", limit: 25 });
+    // The cursor cannot ride inside the body the seal covers.
+    expect(req).not.toHaveProperty("cursor");
+    expect(req).not.toHaveProperty("limit");
+  });
+
+  test("memory_recall omits pagination entirely when the agent supplied none", async () => {
+    const { client, calls } = fakeClient();
+    await tool(client, "memory_recall").handler({
+      mandate: wireMandate,
+      valid_at: "2026-02-01T00:00:00Z",
+      tx_at: "2026-02-02T00:00:00Z",
+    } as never);
+    expect(calls.memoryRecall[0]!.page).toEqual({});
+  });
+
+  test("memory_assemble maps the token budget and recall window", async () => {
+    const { client, calls } = fakeClient();
+    await tool(client, "memory_assemble").handler({
+      mandate: wireMandate,
+      recall: { valid_at: "2026-02-01T00:00:00Z", tx_at: "2026-02-02T00:00:00Z" },
+      budget: { max_tokens: 4000 },
+    } as never);
+
+    const req = calls.memoryAssemble[0]!;
+    expect(req.budget).toEqual({ maxTokens: 4000 });
+    expect(req.recall).toEqual({ validAt: "2026-02-01T00:00:00Z", txAt: "2026-02-02T00:00:00Z" });
+    expect(req.snapshot).toBeUndefined();
+  });
+
+  test("memory_verify passes the artifact through unwrapped", async () => {
+    const { client, calls } = fakeClient();
+    const artifact = { records: [], seal: { hash: "h", signature: "s" } };
+    const res = await tool(client, "memory_verify").handler({ artifact } as never);
+    expect(calls.memoryVerify).toEqual([artifact]);
+    expect((res.structuredContent as { result: { valid: boolean } }).result.valid).toBe(true);
+  });
+
+  test("a mandate missing a capability flag is rejected before the client is reached", async () => {
+    const { client, calls } = fakeClient();
+    const res = await tool(client, "memory_remember").handler({
+      mandate: { namespace: "ops", can_read: true },
+      valid_from: "2026-02-01T00:00:00Z",
+      valid_to: null,
+      source: "agent",
+    } as never);
+    expect(res.isError).toBe(true);
+    expect(res.structuredContent?.["code"]).toBe("intent.malformed");
+    expect(calls.memoryRemember).toHaveLength(0);
+  });
+});
+
+describe("structured failures through the tool surface", () => {
+  test("a denied pay comes back as a problem, not a thrown string", async () => {
+    const { client } = fakeClient();
+    const denying: GeneralLiquidity = {
+      ...client,
+      async pay() {
+        throw Object.assign(new Error("denied"), {
+          name: "DeniedError",
+          type: "intent.denied",
+          problem: {
+            code: "intent.denied",
+            detail: "The gate denied intent idem-1.",
+            reasons: ["payee not on the mandate"],
+          },
+        });
+      },
+    };
+    const res = await tool(denying, "pay").handler({ intent: wireIntent } as never);
+    expect(res.isError).toBe(true);
+    expect(res.structuredContent?.["code"]).toBe("intent.denied");
+    expect(res.structuredContent?.["action"]).toBe("escalate-to-human");
+  });
+
+  test("a confirm verdict parks and names the intent an operator must release", async () => {
+    const { client } = fakeClient();
+    const parking: GeneralLiquidity = {
+      ...client,
+      async pay(intent) {
+        throw Object.assign(new Error("parked"), {
+          name: "ApprovalPendingError",
+          problem: {
+            code: "approval.pending",
+            detail: `Intent ${intent.idempotencyKey} is parked pending operator approval.`,
+            reasons: ["velocity: 4 payments in 10 minutes"],
+            approval: { intentId: intent.idempotencyKey, challenge: "chal-9f2", mandateId: "m1" },
+          },
+        });
+      },
+    };
+    const res = await tool(parking, "pay").handler({ intent: wireIntent } as never);
+    const data = res.structuredContent?.["data"] as {
+      approval: { intentId: string; challenge: string; mandateId?: string };
+      status: number;
+    };
+    expect(res.structuredContent?.["code"]).toBe("approval.pending");
+    expect(data.approval).toEqual({ intentId: "idem-1", challenge: "chal-9f2", mandateId: "m1" });
+    expect(data.status).toBe(202);
+  });
+
+  test("a memory refusal keeps its own code rather than collapsing to internal", async () => {
+    const { client } = fakeClient();
+    const refusing: GeneralLiquidity = {
+      ...client,
+      async memoryRemember() {
+        throw Object.assign(new Error("tainted source"), {
+          problem: { code: "memory.denied", detail: "The engine refused a tainted write." },
+        });
+      },
+    };
+    const res = await tool(refusing, "memory_remember").handler({
+      mandate: wireMandate,
+      body: {},
+      valid_from: "2026-02-01T00:00:00Z",
+      valid_to: null,
+      source: "scraper",
+    } as never);
+    expect(res.structuredContent?.["code"]).toBe("memory.denied");
+  });
+
+  test("a read failure is structured too", async () => {
+    const { client } = fakeClient();
+    const missing: GeneralLiquidity = {
+      ...client,
+      async getJob() {
+        throw Object.assign(new Error("no such intent"), {
+          type: "not-found",
+          problem: { type: "not-found", detail: "No intent with that key." },
+        });
+      },
+    };
+    const res = await tool(missing, "get_job").handler({ id: "nope" } as never);
+    expect(res.structuredContent?.["code"]).toBe("not_found");
+    expect(res.structuredContent?.["action"]).toBe("never-retry");
+  });
+});
+
+describe("read-back verbs", () => {
+  test("get_job delegates the intent key", async () => {
+    const { client, calls } = fakeClient();
+    const res = await tool(client, "get_job").handler({ id: "idem-1" } as never);
+    expect(calls.getJob).toEqual(["idem-1"]);
+    expect((res.structuredContent as { result: { status: string } }).result.status).toBe("settled");
+  });
+
+  test("get_job_events forwards the cursor page", async () => {
+    const { client, calls } = fakeClient();
+    await tool(client, "get_job_events").handler({ id: "idem-1", cursor: "c1", limit: 5 } as never);
+    expect(calls.getJobEvents[0]).toEqual({ id: "idem-1", query: { cursor: "c1", limit: 5 } });
+  });
+
+  test("get_audit passes an empty page when the agent supplied none", async () => {
+    const { client, calls } = fakeClient();
+    await tool(client, "get_audit").handler({} as never);
+    expect(calls.getAudit).toEqual([{}]);
+  });
+
+  test("get_usage forwards the window and its tag filter", async () => {
+    const { client, calls } = fakeClient();
+    await tool(client, "get_usage").handler({
+      since: "2026-01-01T00:00:00Z",
+      until: "2026-02-01T00:00:00Z",
+      tags: ["prod"],
+    } as never);
+    expect(calls.getUsage[0]).toEqual({
+      since: "2026-01-01T00:00:00Z",
+      until: "2026-02-01T00:00:00Z",
+      tags: ["prod"],
+    });
+  });
+
+  test("get_usage without a window fails validation instead of reaching the client", async () => {
+    const { client, calls } = fakeClient();
+    const res = await tool(client, "get_usage").handler({} as never);
+    expect(res.isError).toBe(true);
+    expect(res.structuredContent?.["code"]).toBe("intent.malformed");
+    expect(calls.getUsage).toHaveLength(0);
   });
 });

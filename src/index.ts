@@ -1,15 +1,41 @@
 // @general-liquidity/mcp — an MCP server exposing a CURATED, coarse-grained projection of
-// the General Liquidity surface as tools (resolve · pay · verify · disclose), NOT a 1:1
+// the General Liquidity surface as tools (money/identity · memory · read-back), NOT a 1:1
 // dump of every operation. Each tool delegates to an INJECTED `GeneralLiquidity` client
 // (the sdk shape from @general-liquidity/sdk); the settle primitive lives behind that
-// client, never here.
+// client, never here, and the operator verbs (approve · refund · kill switch · forget) are
+// absent by construction — see the header in ./tools.ts.
+//
+// Tool failures are structured: every handler returns the shared RFC 9457 problem the REST
+// surface emits, so an agent branches on a stable code and action class rather than on a
+// thrown string. See ./problem.ts (taxonomy) and ./results.ts (mapping).
 
 import type { GeneralLiquidity } from "@general-liquidity/sdk";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { buildTools } from "./tools.ts";
 
-export type { ToolDef, ToolResult } from "./tools.ts";
-export { buildTools, TOOL_NAMES } from "./tools.ts";
+export type {
+  ErrorAction,
+  PendingApproval,
+  Problem,
+  ProblemCode,
+} from "./problem.ts";
+export {
+  ALL_ERROR_ACTIONS,
+  ALL_PROBLEM_CODES,
+  actionFor,
+  isRetryable,
+  nextStep,
+  problem,
+  requiresHuman,
+} from "./problem.ts";
+export type { AnyToolDef, StructuredError, ToolDef, ToolResult } from "./tools.ts";
+export {
+  ALL_TOOL_NAMES,
+  buildTools,
+  MEMORY_TOOL_NAMES,
+  READ_TOOL_NAMES,
+  TOOL_NAMES,
+} from "./tools.ts";
 
 export interface McpServerOptions {
   name?: string;

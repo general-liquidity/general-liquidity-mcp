@@ -1,7 +1,7 @@
 {
   "name": "@general-liquidity/mcp",
   "version": "0.1.0",
-  "description": "A curated MCP server exposing the General Liquidity surface as four task-shaped tools (resolve, pay, verify, disclose) over an injected client.",
+  "description": "A curated MCP server exposing the General Liquidity surface as task-shaped tools (money/identity, memory, read-back) over an injected client, with RFC 9457 structured tool failures.",
   "license": "MIT",
   "type": "module",
   "repository": {

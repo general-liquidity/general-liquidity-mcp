@@ -181,7 +181,7 @@ export function buildTools(client: GeneralLiquidity): AnyToolDef[] {
     {
       name: "verify",
       description:
-        "Check a counterparty's signed disclosure against policy (identity + provenance + enforcement proof), returning a Decision.",
+        "Check a counterparty's signed disclosure against policy (identity + provenance + enforcement proof), returning a Decision. The Decision's `checks` name every policy predicate the gate evaluated and whether each passed; branch on those ids, not on the prose in `reasons`.",
       inputSchema: { disclosure: disclosureShape },
       handler: async (args) => {
         const { disclosure } = z.object({ disclosure: disclosureShape }).parse(args);

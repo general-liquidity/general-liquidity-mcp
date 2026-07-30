@@ -16,7 +16,9 @@ interface Calls {
   disclose: number;
 }
 
-function fakeClient(): { client: GeneralLiquidity; calls: Calls } {
+const ALLOW: Decision = { outcome: "allow", reasons: [], mandateId: "m1" };
+
+function fakeClient(decision: Decision = ALLOW): { client: GeneralLiquidity; calls: Calls } {
   const calls: Calls = { resolve: [], pay: [], verify: [], disclose: 0 };
   const client: GeneralLiquidity = {
     async resolve(ref) {
@@ -36,7 +38,7 @@ function fakeClient(): { client: GeneralLiquidity; calls: Calls } {
     },
     async verify(disclosure) {
       calls.verify.push(disclosure);
-      return { outcome: "allow", reasons: [], mandateId: "m1" } as Decision;
+      return decision;
     },
     async disclose() {
       calls.disclose += 1;
@@ -157,6 +159,32 @@ describe("curated tool surface", () => {
     expect(calls.verify).toHaveLength(1);
     expect(calls.verify[0]!.signature.publicKey).toBe("cp");
     expect(res.structuredContent).toBeDefined();
+  });
+
+  test("verify relays the decision's named checks so an agent can branch on ids", async () => {
+    const { client } = fakeClient({
+      outcome: "deny",
+      reasons: ["payee not on the mandate"],
+      mandateId: "m1",
+      checks: [
+        { id: "mandate.active", passed: true },
+        { id: "mandate.payee_allowed", passed: false },
+      ],
+    });
+    const verify = buildTools(client).find((t) => t.name === "verify")!;
+    const res = await verify.handler({
+      disclosure: {
+        document: {},
+        signature: { algorithm: "ed25519", public_key: "cp", value: "s" },
+      },
+    } as never);
+
+    const result = (res.structuredContent as { result: Decision }).result;
+    expect(result.checks?.filter((c) => !c.passed).map((c) => c.id)).toEqual([
+      "mandate.payee_allowed",
+    ]);
+    // Text content is what a text-only host reads; the ids have to survive there too.
+    expect(res.content[0]!.text).toContain("mandate.payee_allowed");
   });
 
   test("disclose delegates with no args", async () => {

@@ -72,6 +72,20 @@ function fakeClient(): { client: GeneralLiquidity; calls: Calls } {
         byOutcome: {},
       };
     },
+    // The memory half of the client. This server projects none of it as a tool,
+    // but the fake has to satisfy the interface or the type drifts silently.
+    async memoryRemember() {
+      throw new Error("not used by the MCP surface");
+    },
+    async memoryRecall() {
+      throw new Error("not used by the MCP surface");
+    },
+    async memoryAssemble() {
+      throw new Error("not used by the MCP surface");
+    },
+    async memoryVerify() {
+      throw new Error("not used by the MCP surface");
+    },
   };
   return { client, calls };
 }

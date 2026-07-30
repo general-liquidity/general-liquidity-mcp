@@ -11,6 +11,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "bin": {
+    "general-liquidity-mcp": "./src/bin.ts"
+  },
   "files": [
     "src",
     "!src/**/*.test.ts"

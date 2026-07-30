@@ -61,7 +61,9 @@ const absentSigner: Signer = {
 async function main(): Promise<void> {
   const baseUrl = process.env.GL_BASE_URL;
   if (!baseUrl) {
-    throw new Error("GL_BASE_URL is required (for example https://sandbox.api.generalliquidity.com/)");
+    throw new Error(
+      "GL_BASE_URL is required (for example https://sandbox.api.generalliquidity.com/)",
+    );
   }
 
   const seed = process.env.GL_SIGNER_PRIVATE_KEY;
@@ -77,6 +79,8 @@ async function main(): Promise<void> {
 main().catch((err: unknown) => {
   // stderr, never stdout: stdout is the protocol channel and anything written
   // there that is not a message corrupts the session.
-  process.stderr.write(`general-liquidity mcp: ${err instanceof Error ? err.message : String(err)}\n`);
+  process.stderr.write(
+    `general-liquidity mcp: ${err instanceof Error ? err.message : String(err)}\n`,
+  );
   process.exit(1);
 });

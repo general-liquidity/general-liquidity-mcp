@@ -42,7 +42,7 @@ const termsShape = z.object({
   reversibility: z.enum(["reversible", "irreversible"]),
   finality: z.enum(["instant", "deferred"]),
   credential: z.string(),
-  rail: z.enum(["x402", "mpp", "ap2", "acp", "ucp", "card", "onchain"]),
+  rail: z.enum(["x402", "mpp", "ap2", "acp", "ucp", "card", "onchain", "l402", "ach", "wire"]),
   capital_source: z.enum(["payer", "facilitator", "merchant_of_record", "solver"]),
   presence: z.enum(["present", "delegated"]),
 });

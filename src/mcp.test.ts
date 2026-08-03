@@ -1,12 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import type {
   AssembleRequest,
+  BuyRequest,
+  Cart,
+  Commerce,
   Counterparty,
   Decision,
   Disclosure,
   GeneralLiquidity,
   Intent,
+  Order,
   PageQuery,
+  QuoteRequest,
   RecallRequest,
   Receipt,
   RememberRequest,
@@ -15,6 +20,7 @@ import type {
 import {
   ALL_TOOL_NAMES,
   buildTools,
+  COMMERCE_TOOL_NAMES,
   createMcpServer,
   MEMORY_TOOL_NAMES,
   READ_TOOL_NAMES,
@@ -28,6 +34,8 @@ interface Calls {
   disclose: number;
   memoryRemember: RememberRequest[];
   memoryRecall: Array<{ req: RecallRequest; page: PageQuery }>;
+  quote: QuoteRequest[];
+  buy: BuyRequest[];
   memoryAssemble: AssembleRequest[];
   memoryVerify: unknown[];
   getJob: string[];
@@ -38,12 +46,17 @@ interface Calls {
 
 const ALLOW: Decision = { outcome: "allow", reasons: [], mandateId: "m1" };
 
-function fakeClient(decision: Decision = ALLOW): { client: GeneralLiquidity; calls: Calls } {
+function fakeClient(decision: Decision = ALLOW): {
+  client: GeneralLiquidity & Commerce;
+  calls: Calls;
+} {
   const calls: Calls = {
     resolve: [],
     pay: [],
     verify: [],
     disclose: 0,
+    quote: [],
+    buy: [],
     memoryRemember: [],
     memoryRecall: [],
     memoryAssemble: [],
@@ -53,7 +66,7 @@ function fakeClient(decision: Decision = ALLOW): { client: GeneralLiquidity; cal
     getAudit: [],
     getUsage: [],
   };
-  const client: GeneralLiquidity = {
+  const client: GeneralLiquidity & Commerce = {
     async resolve(ref) {
       calls.resolve.push(ref);
       return { id: ref, transport: "caip", capabilities: [], rails: ["x402"] } as Counterparty;
@@ -68,6 +81,36 @@ function fakeClient(decision: Decision = ALLOW): { client: GeneralLiquidity; cal
         settledAt: "2026-01-01T00:00:00Z",
         enforcement: "hash",
       } as Receipt;
+    },
+    async quote(req) {
+      calls.quote.push(req);
+      return {
+        id: "cart-1",
+        protocol: req.rail,
+        status: "ready",
+        currency: req.currency,
+        total: { value: "1200", asset: req.currency },
+        merchant: req.merchant,
+      } as Cart;
+    },
+    async buy(req) {
+      calls.buy.push(req);
+      return {
+        id: "order-1",
+        cartId: "cart-1",
+        protocol: req.rail,
+        status: "completed",
+        merchant: req.merchant,
+        receipt: {
+          intentKey: "cart-1",
+          rail: req.terms.rail,
+          reference: "0xdef",
+          terms: req.terms,
+          settledAt: "2026-01-01T00:00:00Z",
+          enforcement: "hash",
+        } as Receipt,
+        placedAt: "2026-01-01T00:00:00Z",
+      } as Order;
     },
     async verify(disclosure) {
       calls.verify.push(disclosure);
@@ -185,6 +228,7 @@ describe("curated tool surface", () => {
     expect(names).toEqual([...ALL_TOOL_NAMES]);
     expect(ALL_TOOL_NAMES).toEqual([
       ...TOOL_NAMES,
+      ...COMMERCE_TOOL_NAMES,
       ...MEMORY_TOOL_NAMES,
       ...READ_TOOL_NAMES,
     ] as never);
@@ -228,6 +272,79 @@ describe("curated tool surface", () => {
     expect(intent.terms.capitalSource).toBe("payer");
     expect(intent.envelope.mandateId).toBe("m1");
     expect(intent.envelope.grant.agentId).toBe("did:example:agent");
+  });
+
+  test("quote delegates the priced-cart request without an envelope", async () => {
+    const { client, calls } = fakeClient();
+    const quote = buildTools(client).find((t) => t.name === "quote")!;
+    const res = await quote.handler({
+      rail: "acp",
+      merchant: "shop.example",
+      currency: "USD",
+      lines: [{ id: "sku-1", quantity: 2 }],
+    } as never);
+    expect(calls.quote).toHaveLength(1);
+    expect(calls.quote[0]!.lines).toEqual([{ id: "sku-1", quantity: 2 }]);
+    // Commits nothing, so it carries no mandate-bearing envelope and no terms.
+    expect(calls.quote[0]).not.toHaveProperty("envelope");
+    expect(res.content[0]!.text).toContain("cart-1");
+  });
+
+  test("buy maps the snake_case tool input to a canonical BuyRequest and delegates", async () => {
+    const { client, calls } = fakeClient();
+    const buy = buildTools(client).find((t) => t.name === "buy")!;
+    await buy.handler({
+      idempotency_key: "buy-1",
+      rail: "ucp",
+      merchant: "shop.example",
+      currency: "USD",
+      lines: [{ id: "sku-1", quantity: 1 }],
+      purpose: "office-supplies",
+      terms: wireIntent.terms,
+      envelope: wireIntent.envelope,
+    } as never);
+    expect(calls.buy).toHaveLength(1);
+    const req = calls.buy[0]!;
+    expect(req.idempotencyKey).toBe("buy-1");
+    // The shared terms/envelope mappers must produce the same camelCase shape `pay` gets:
+    // the envelope is signed material and the same gate evaluates both verbs.
+    expect(req.terms.capitalSource).toBe("payer");
+    expect(req.envelope.mandateId).toBe("m1");
+    expect(req.envelope.grant.agentId).toBe("did:example:agent");
+    // No amount crosses the boundary — the price is the merchant's, off the cart.
+    expect(req).not.toHaveProperty("amount");
+  });
+
+  test("commerce refuses a rail that is not a checkout protocol", async () => {
+    const { client, calls } = fakeClient();
+    const quote = buildTools(client).find((t) => t.name === "quote")!;
+    // `x402` is a valid RailId but not a checkout protocol; it is refused at the boundary
+    // rather than dispatched to a merchant that cannot speak it.
+    const res = await quote.handler({
+      rail: "x402",
+      merchant: "shop.example",
+      currency: "USD",
+      lines: [{ id: "sku-1", quantity: 1 }],
+    } as never);
+    expect(calls.quote).toHaveLength(0);
+    expect(res.structuredContent?.code).toBe("intent.malformed");
+  });
+
+  test("commerce refuses a non-positive quantity", async () => {
+    const { client, calls } = fakeClient();
+    const buy = buildTools(client).find((t) => t.name === "buy")!;
+    const res = await buy.handler({
+      idempotency_key: "buy-2",
+      rail: "acp",
+      merchant: "shop.example",
+      currency: "USD",
+      lines: [{ id: "sku-1", quantity: 0 }],
+      purpose: "office-supplies",
+      terms: wireIntent.terms,
+      envelope: wireIntent.envelope,
+    } as never);
+    expect(calls.buy).toHaveLength(0);
+    expect(res.structuredContent?.code).toBe("intent.malformed");
   });
 
   test("verify maps disclosure and delegates", async () => {
@@ -301,7 +418,7 @@ const wireMandate = {
   as_of_floor: "2026-01-01T00:00:00Z",
 };
 
-function tool(client: GeneralLiquidity, name: string) {
+function tool(client: GeneralLiquidity & Commerce, name: string) {
   return buildTools(client).find((t) => t.name === name)!;
 }
 
@@ -403,7 +520,7 @@ describe("memory verbs", () => {
 describe("structured failures through the tool surface", () => {
   test("a denied pay comes back as a problem, not a thrown string", async () => {
     const { client } = fakeClient();
-    const denying: GeneralLiquidity = {
+    const denying: GeneralLiquidity & Commerce = {
       ...client,
       async pay() {
         throw Object.assign(new Error("denied"), {
@@ -425,7 +542,7 @@ describe("structured failures through the tool surface", () => {
 
   test("a confirm verdict parks and names the intent an operator must release", async () => {
     const { client } = fakeClient();
-    const parking: GeneralLiquidity = {
+    const parking: GeneralLiquidity & Commerce = {
       ...client,
       async pay(intent) {
         throw Object.assign(new Error("parked"), {
@@ -451,7 +568,7 @@ describe("structured failures through the tool surface", () => {
 
   test("a memory refusal keeps its own code rather than collapsing to internal", async () => {
     const { client } = fakeClient();
-    const refusing: GeneralLiquidity = {
+    const refusing: GeneralLiquidity & Commerce = {
       ...client,
       async memoryRemember() {
         throw Object.assign(new Error("tainted source"), {
@@ -471,7 +588,7 @@ describe("structured failures through the tool surface", () => {
 
   test("a read failure is structured too", async () => {
     const { client } = fakeClient();
-    const missing: GeneralLiquidity = {
+    const missing: GeneralLiquidity & Commerce = {
       ...client,
       async getJob() {
         throw Object.assign(new Error("no such intent"), {

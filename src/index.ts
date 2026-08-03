@@ -9,7 +9,7 @@
 // surface emits, so an agent branches on a stable code and action class rather than on a
 // thrown string. See ./problem.ts (taxonomy) and ./results.ts (mapping).
 
-import type { GeneralLiquidity } from "@general-liquidity/sdk";
+import type { Commerce, GeneralLiquidity } from "@general-liquidity/sdk";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { buildTools } from "./tools.ts";
 
@@ -32,6 +32,7 @@ export type { AnyToolDef, StructuredError, ToolDef, ToolResult } from "./tools.t
 export {
   ALL_TOOL_NAMES,
   buildTools,
+  COMMERCE_TOOL_NAMES,
   MEMORY_TOOL_NAMES,
   READ_TOOL_NAMES,
   TOOL_NAMES,
@@ -49,7 +50,7 @@ export interface McpServerOptions {
  * transport (stdio / HTTP) at the composition root.
  */
 export function createMcpServer(
-  client: GeneralLiquidity,
+  client: GeneralLiquidity & Commerce,
   options: McpServerOptions = {},
 ): McpServer {
   const server = new McpServer({

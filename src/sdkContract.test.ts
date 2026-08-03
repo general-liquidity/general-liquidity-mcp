@@ -13,7 +13,13 @@
 // repo must move with it.
 
 import { describe, expect, test } from "bun:test";
-import type { Decision, Disclosure, GeneralLiquidity, Intent } from "@general-liquidity/sdk";
+import type {
+  Commerce,
+  Decision,
+  Disclosure,
+  GeneralLiquidity,
+  Intent,
+} from "@general-liquidity/sdk";
 import * as sdk from "@general-liquidity/sdk";
 import { buildTools } from "./tools.ts";
 
@@ -33,7 +39,7 @@ describe("installed @general-liquidity/sdk contract", () => {
   test("the pay tool schema advertises the SDK's rails", () => {
     // Direction checks are compile-time (see tools.ts); this only proves the enum survived
     // into the registered schema instead of collapsing to a bare string.
-    const pay = buildTools({} as GeneralLiquidity).find((t) => t.name === "pay");
+    const pay = buildTools({} as GeneralLiquidity & Commerce).find((t) => t.name === "pay");
     const intent = pay?.inputSchema.intent as unknown as {
       shape: { terms: { shape: { rail: { options: readonly string[] } } } };
     };

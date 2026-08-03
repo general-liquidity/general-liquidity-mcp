@@ -1,8 +1,14 @@
 // The curated projection. Task-shaped verbs mapped 1:1 onto the @general-liquidity/sdk
-// `GeneralLiquidity` methods, in three groups: money/identity (resolve · pay · verify ·
-// disclose), memory (remember · recall · assemble · verify) and read-back (job · job events
-// · audit · usage). This is a coarse-grained surface, NOT a dump of every internal
-// operation. Tool params are snake_case and the surface takes camelCase, so each handler
+// `GeneralLiquidity` + `Commerce` methods, in four groups: money/identity (resolve · pay ·
+// verify · disclose), commerce (quote · buy), memory (remember · recall · assemble · verify)
+// and read-back (job · job events · audit · usage). This is a coarse-grained surface, NOT a
+// dump of every internal operation.
+//
+// Commerce is the OPT-IN tier (BUILD-PLAN §5: the MCP surface is a projection of
+// pay/buy/resolve). The two tools are always registered; whether they answer is the
+// deployment's decision, and a stack without the tier returns the same structured
+// `not_found` problem as any other refusal. Registering them conditionally would make the
+// tool list vary by server, which a model cannot reason about. Tool params are snake_case and the surface takes camelCase, so each handler
 // maps at the seam. That snake_case is an LLM tool-input vocabulary, NOT the wire: the wire
 // is camelCase, and this mapping exists only because these names are what a model is
 // prompted with. Nothing here reaches the HTTP boundary, which the client crosses unrenamed.
@@ -22,10 +28,13 @@
 // parked spend. An agent that can approve its own payment has no gate.
 
 import type {
+  BuyRequest,
+  Commerce,
   Disclosure,
   GeneralLiquidity,
   Intent,
   MemoryMandate,
+  QuoteRequest,
   Snapshot,
 } from "@general-liquidity/sdk";
 import { z } from "zod";
@@ -105,6 +114,17 @@ export type UncoveredCapitalSource = AssertNever<
 const PRESENCE = ["present", "delegated"] as const satisfies readonly Terms["presence"][];
 export type UncoveredPresence = AssertNever<Uncovered<Terms["presence"], typeof PRESENCE>>;
 
+// The checkout protocols, a CLOSED SUBSET of the rails above. `quote`/`buy` dispatch only to
+// these: a RailId that is not a checkout protocol is refused at the boundary rather than
+// routed. Checked in both directions like the rails, so a checkout protocol added to the SDK
+// and not added here is a type error in this file, not a tool that silently refuses it.
+type CheckoutRailUnion = QuoteRequest["rail"];
+
+const CHECKOUT_RAILS = ["acp", "ucp"] as const satisfies readonly CheckoutRailUnion[];
+export type UncoveredCheckoutRails = AssertNever<
+  Uncovered<CheckoutRailUnion, typeof CHECKOUT_RAILS>
+>;
+
 const termsShape = z.object({
   reversibility: z.enum(REVERSIBILITY),
   finality: z.enum(FINALITY),
@@ -155,8 +175,65 @@ const disclosureShape = z.object({
   rotation_chain: z.array(keyRotationStatementShape).optional(),
 });
 
+/** One requested line: a quantity of one merchant item. Carries no price. */
+const commerceLineShape = z.object({
+  id: z.string(),
+  quantity: z.number().int().min(1),
+});
+
+const quoteShape = {
+  rail: z.enum(CHECKOUT_RAILS),
+  merchant: z.string(),
+  currency: z.string(),
+  lines: z.array(commerceLineShape).min(1),
+};
+
+// `buy` = the quote fields plus the same mandate-bearing envelope and terms `/pay` carries,
+// because the same gate evaluates it. No amount: the price is the merchant's, read from the
+// server-authoritative cart. The replay key is REQUIRED here and rides the body — unlike
+// `pay`, nothing mints one on the caller's behalf, because a caller that did not choose its
+// own key cannot re-send the identical request after a retryable `rail.unavailable`.
+const buyShape = {
+  ...quoteShape,
+  idempotency_key: z.string(),
+  purpose: z.string(),
+  terms: termsShape,
+  envelope: envelopeShape,
+};
+
 type WireIntent = z.infer<typeof intentShape>;
 type WireDisclosure = z.infer<typeof disclosureShape>;
+type WireBuy = z.infer<z.ZodObject<typeof buyShape>>;
+
+// `pay` and `buy` carry the SAME terms and the SAME mandate-bearing envelope, because the
+// same gate evaluates both. These two mappers are shared rather than restated per verb: the
+// envelope is signed material, so two copies that drift produce a signature that verifies in
+// one path and fails in the other, which is the worst possible failure to debug.
+
+function toTerms(wire: WireIntent["terms"]): Intent["terms"] {
+  return {
+    reversibility: wire.reversibility,
+    finality: wire.finality,
+    credential: wire.credential,
+    rail: wire.rail,
+    capitalSource: wire.capital_source,
+    presence: wire.presence,
+  };
+}
+
+function toEnvelope(wire: WireIntent["envelope"]): Intent["envelope"] {
+  return {
+    identity: wire.identity,
+    mandateId: wire.mandate_id,
+    grant: {
+      agentId: wire.grant.agent_id,
+      mandateId: wire.grant.mandate_id,
+      expiresAt: wire.grant.expires_at,
+      signature: wire.grant.signature,
+    },
+    signature: wire.signature,
+  };
+}
 
 /** snake_case wire → canonical camelCase `Intent`. The one seam that owns the mapping. */
 function toIntent(wire: WireIntent): Intent {
@@ -165,25 +242,22 @@ function toIntent(wire: WireIntent): Intent {
     payee: wire.payee,
     amount: wire.amount,
     purpose: wire.purpose,
-    terms: {
-      reversibility: wire.terms.reversibility,
-      finality: wire.terms.finality,
-      credential: wire.terms.credential,
-      rail: wire.terms.rail,
-      capitalSource: wire.terms.capital_source,
-      presence: wire.terms.presence,
-    },
-    envelope: {
-      identity: wire.envelope.identity,
-      mandateId: wire.envelope.mandate_id,
-      grant: {
-        agentId: wire.envelope.grant.agent_id,
-        mandateId: wire.envelope.grant.mandate_id,
-        expiresAt: wire.envelope.grant.expires_at,
-        signature: wire.envelope.grant.signature,
-      },
-      signature: wire.envelope.signature,
-    },
+    terms: toTerms(wire.terms),
+    envelope: toEnvelope(wire.envelope),
+  };
+}
+
+/** snake_case wire → canonical camelCase `BuyRequest`. */
+function toBuyRequest(wire: WireBuy): BuyRequest {
+  return {
+    idempotencyKey: wire.idempotency_key,
+    rail: wire.rail,
+    merchant: wire.merchant,
+    currency: wire.currency,
+    lines: wire.lines,
+    purpose: wire.purpose,
+    terms: toTerms(wire.terms),
+    envelope: toEnvelope(wire.envelope),
   };
 }
 
@@ -296,7 +370,7 @@ async function guarded(run: () => Promise<ToolResult>): Promise<ToolResult> {
  * separately from the server so tests can assert registration + delegation with a fake
  * client and no transport.
  */
-export function buildTools(client: GeneralLiquidity): AnyToolDef[] {
+export function buildTools(client: GeneralLiquidity & Commerce): AnyToolDef[] {
   // Handlers parse args through the tool's own zod schema, so delegation is type-safe at
   // authoring time and validated at runtime even when a transport skips validation.
   return [
@@ -339,6 +413,32 @@ export function buildTools(client: GeneralLiquidity): AnyToolDef[] {
         "Produce GL's own signed disclosure: what this agent is and what it is authorized to do.",
       inputSchema: {},
       handler: () => guarded(async () => ok(await client.disclose())),
+    },
+
+    // Commerce. The opt-in tier: `quote` prices, `buy` settles. Registered unconditionally
+    // so the tool list does not vary by deployment; a stack without the tier answers
+    // `not_found`, which arrives as a structured problem like any other refusal.
+    {
+      name: "quote",
+      description:
+        "Price a cart against a merchant over a checkout protocol (acp | ucp). Commits nothing and moves no money: it returns the server-authoritative Cart the merchant priced, including its total and its status. Only a Cart in status `ready` can then be bought; every other status is the refusal reporting what the checkout still needs.",
+      inputSchema: quoteShape,
+      handler: (args) =>
+        guarded(async () => {
+          const a = z.object(quoteShape).parse(args);
+          return ok(await client.quote(a satisfies QuoteRequest));
+        }),
+    },
+    {
+      name: "buy",
+      description:
+        "Drive a merchant checkout to a completed Order, authorizing it through the SAME gate `pay` uses. The PRICE IS NEVER YOURS TO SET: it comes from the server-authoritative cart the merchant priced, which is why this takes lines and no amount. The merchant stays merchant-of-record. Supply your own `idempotency_key` — it is not minted for you, because only a caller that chose its key can safely re-send after a retryable rail failure. There is no parked-intent path here: a gate `confirm` comes back as `intent.denied`, not `approval.pending`, because a merchant session cannot be held open across an out-of-band operator approval.",
+      inputSchema: buyShape,
+      handler: (args) =>
+        guarded(async () => {
+          const a = z.object(buyShape).parse(args);
+          return ok(await client.buy(toBuyRequest(a)));
+        }),
     },
 
     // Memory. Four verbs, mirroring the `/memory/*` routes an agent may call. `forget` is
@@ -493,6 +593,12 @@ export function buildTools(client: GeneralLiquidity): AnyToolDef[] {
 export const TOOL_NAMES = ["resolve", "pay", "verify", "disclose"] as const;
 
 /**
+ * The commerce verbs. Registered on every server even though the tier is opt-in per
+ * deployment: a tool list that changes shape by stack is one a model cannot plan against.
+ */
+export const COMMERCE_TOOL_NAMES = ["quote", "buy"] as const;
+
+/**
  * The memory verbs. `memory_forget` is intentionally excluded: erasure is
  * operator-privileged, and the injected agent client has no method for it.
  */
@@ -507,4 +613,9 @@ export const MEMORY_TOOL_NAMES = [
 export const READ_TOOL_NAMES = ["get_job", "get_job_events", "get_audit", "get_usage"] as const;
 
 /** Every tool this server registers, in registration order. */
-export const ALL_TOOL_NAMES = [...TOOL_NAMES, ...MEMORY_TOOL_NAMES, ...READ_TOOL_NAMES] as const;
+export const ALL_TOOL_NAMES = [
+  ...TOOL_NAMES,
+  ...COMMERCE_TOOL_NAMES,
+  ...MEMORY_TOOL_NAMES,
+  ...READ_TOOL_NAMES,
+] as const;

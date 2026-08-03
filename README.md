@@ -26,6 +26,26 @@ Money and identity:
 - `disclose` — produce this agent's own signed disclosure: what it is and what it
   is authorized to do.
 
+Commerce (the opt-in tier):
+
+- `quote` — price a cart against a merchant over a checkout protocol (`acp` or
+  `ucp`). Commits nothing and moves no money; returns the server-authoritative
+  Cart the merchant priced. Only a Cart in status `ready` can then be bought.
+- `buy` — drive that checkout to a completed Order, authorized through the same
+  gate `pay` uses. The merchant stays merchant-of-record.
+
+The price is never the caller's to set: it comes from the cart the merchant
+priced, which is why `buy` takes lines and no amount. Its replay key rides the
+body and must be supplied, because only a caller that chose its own key can
+safely re-send after a retryable rail failure. There is no parked-intent path —
+a merchant session cannot be held open across an out-of-band operator approval,
+so a gate `confirm` comes back as `intent.denied`, not `approval.pending`.
+
+Both tools are registered on every server even though the tier is opt-in per
+deployment: a tool list whose shape depends on the stack is one a model cannot
+plan against. A deployment without the tier answers `not_found`, which arrives
+as the same structured problem as any other refusal.
+
 Memory (bi-temporal, mandate-scoped):
 
 - `memory_remember` — write one bi-temporal record under a mandate.
@@ -107,8 +127,8 @@ at the process running that entry point.
 - `buildTools` / `ToolDef` / `ToolResult` — the tool set and its call-result shape,
   exported separately so tests can assert registration and delegation with a fake
   client and no transport.
-- `TOOL_NAMES` / `MEMORY_TOOL_NAMES` / `READ_TOOL_NAMES` / `ALL_TOOL_NAMES` — the
-  exposed tool names, by group.
+- `TOOL_NAMES` / `COMMERCE_TOOL_NAMES` / `MEMORY_TOOL_NAMES` / `READ_TOOL_NAMES` /
+  `ALL_TOOL_NAMES` — the exposed tool names, by group.
 - `problem` / `actionFor` / `nextStep` / `isRetryable` / `requiresHuman` /
   `ALL_PROBLEM_CODES` and the `Problem`, `ProblemCode`, `ErrorAction`,
   `StructuredError` types — the shared failure taxonomy.

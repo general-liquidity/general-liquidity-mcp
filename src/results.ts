@@ -127,6 +127,7 @@ const CODE_IS_KNOWN: Record<ProblemCode, true> = {
   unsupported_media_type: true,
   payload_too_large: true,
   rate_limited: true,
+  quota_exceeded: true,
   internal: true,
 };
 
@@ -183,6 +184,7 @@ const ERROR_NAME_CODE: Record<string, ProblemCode> = {
   IdempotencyConflictError: "intent.malformed",
   AuthError: "principal.unauthorized",
   RateLimitError: "rate_limited",
+  QuotaExceededError: "quota_exceeded",
   ServerError: "internal",
 };
 

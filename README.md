@@ -120,6 +120,12 @@ action classes (`never-retry`, `retry-as-is`, `retry-after-renegotiation`,
 (`approval.pending`) and carries the parked intent id and challenge an operator
 needs to release it out-of-band.
 
+Two codes now share `429` and mean opposite things, which is the sharpest reason to branch on
+`action`. `rate_limited` is `retry-as-is` and clears in seconds. `quota_exceeded` is
+`escalate-to-human`: the plan's call allowance is spent, and an agent can no more buy itself a
+larger plan than approve its own parked payment. A client keyed on the status alone waits out a
+billing period for something an operator clears in a minute.
+
 The taxonomy in `src/problem.ts` mirrors the platform's
 `@general-liquidity/surface` vocabulary, which is an unpublished workspace
 package this repository cannot import. `src/results.ts` also bridges the SDK's

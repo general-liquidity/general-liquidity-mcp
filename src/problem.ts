@@ -82,6 +82,10 @@ export type ProblemCode =
   | "unsupported_media_type"
   | "payload_too_large"
   | "rate_limited"
+  // Inside the request window, but the plan's call allowance is spent. Shares 429 with
+  // `rate_limited` and means the opposite thing: waiting does not clear it inside any window
+  // an agent is willing to wait out.
+  | "quota_exceeded"
   | "internal";
 
 /**
@@ -149,6 +153,7 @@ const TITLES: Record<ProblemCode, string> = {
   unsupported_media_type: "Unsupported media type",
   payload_too_large: "Request body too large",
   rate_limited: "Rate limit exceeded",
+  quota_exceeded: "Plan allowance exhausted",
   internal: "Internal error",
 };
 
@@ -191,6 +196,7 @@ const STATUS: Record<ProblemCode, number> = {
   // 429: the caller may retry after the window, so this is the one refusal that carries a
   // machine-readable backoff instead of a dead end.
   rate_limited: 429,
+  quota_exceeded: 429,
   internal: 500,
 };
 
@@ -224,6 +230,9 @@ const ACTIONS: Record<ProblemCode, ErrorAction> = {
   unsupported_media_type: "never-retry",
   payload_too_large: "never-retry",
   rate_limited: "retry-as-is",
+  // An agent cannot buy itself a bigger plan any more than it can approve its own parked
+  // payment: raising the ceiling is an operator act on a separate authority.
+  quota_exceeded: "escalate-to-human",
   internal: "retry-as-is",
 };
 

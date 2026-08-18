@@ -58,7 +58,17 @@ Read-back over the calling principal's own record:
 - `get_job` — the lifecycle of one intent by its idempotency key.
 - `get_job_events` — that intent's signed, hash-linked audit events.
 - `get_audit` — the audit trail across every intent.
+- `get_mandate` — the live spend authority covering the caller: caps, expiry, when the
+  period resets, and how much of each has been drawn.
 - `get_usage` — metered call counts over a window.
+
+`get_mandate` is the one an agent should reach for BEFORE committing to anything
+metered or long-running, rather than discovering a ceiling by being refused. Its
+description carries a warning worth repeating here: `spent` and `remaining` are
+ABSENT together when the server holds a prior spend in a currency it cannot
+convert, which is the same state in which the gate refuses to authorize at all.
+Absent means unknown, never zero — the opposite reading has a model believe it
+holds its whole budget at exactly the moment it holds none.
 
 ### What is deliberately absent
 

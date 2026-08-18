@@ -1,8 +1,8 @@
 // The curated projection. Task-shaped verbs mapped 1:1 onto the @general-liquidity/sdk
 // `GeneralLiquidity` + `Commerce` methods, in four groups: money/identity (resolve · pay ·
 // verify · disclose), commerce (quote · buy), memory (remember · recall · assemble · verify)
-// and read-back (job · job events · audit · usage). This is a coarse-grained surface, NOT a
-// dump of every internal operation.
+// and read-back (job · job events · audit · mandate · usage). This is a coarse-grained
+// surface, NOT a dump of every internal operation.
 //
 // Commerce is the OPT-IN tier (BUILD-PLAN §5: the MCP surface is a projection of
 // pay/buy/resolve). The two tools are always registered; whether they answer is the
@@ -570,6 +570,13 @@ export function buildTools(client: GeneralLiquidity & Commerce): AnyToolDef[] {
         }),
     },
     {
+      name: "get_mandate",
+      description:
+        "Read the spend authority covering you and what is left of it: the live mandates, their per-transaction and per-period caps, when the period resets, and how much of each has already been drawn. Ask this BEFORE committing to anything metered or long-running rather than discovering the ceiling by being refused. `remaining` is the gate's own measurement, so spending exactly it is not refused for the period cap. CRITICAL: `spent` and `remaining` are ABSENT together when the server holds a prior spend in a currency it cannot convert — the same state in which the gate refuses to authorize at all. Absent means UNKNOWN, never zero; treating it as zero would have you believe you hold your whole budget at the moment you hold none. An empty list means you hold no live authority, which is an answer rather than an error. Read-only: it grants nothing and widens nothing.",
+      inputSchema: {},
+      handler: () => guarded(async () => ok(await client.getMandate())),
+    },
+    {
       name: "get_usage",
       description:
         "Read metered call counts for the calling principal over a window, broken down by operation and outcome. `since` is inclusive, `until` exclusive; `tags` counts only calls carrying EVERY listed tag.",
@@ -610,7 +617,13 @@ export const MEMORY_TOOL_NAMES = [
 ] as const;
 
 /** The read-back verbs. Reads over the calling principal's own record; they grant nothing. */
-export const READ_TOOL_NAMES = ["get_job", "get_job_events", "get_audit", "get_usage"] as const;
+export const READ_TOOL_NAMES = [
+  "get_job",
+  "get_job_events",
+  "get_audit",
+  "get_mandate",
+  "get_usage",
+] as const;
 
 /** Every tool this server registers, in registration order. */
 export const ALL_TOOL_NAMES = [

@@ -42,6 +42,7 @@ interface Calls {
   getJobEvents: Array<{ id: string; query: PageQuery }>;
   getAudit: PageQuery[];
   getUsage: UsageQuery[];
+  getMandate: number;
 }
 
 const ALLOW: Decision = { outcome: "allow", reasons: [], mandateId: "m1" };
@@ -65,6 +66,7 @@ function fakeClient(decision: Decision = ALLOW): {
     getJobEvents: [],
     getAudit: [],
     getUsage: [],
+    getMandate: 0,
   };
   const client: GeneralLiquidity & Commerce = {
     async resolve(ref) {
@@ -140,6 +142,10 @@ function fakeClient(decision: Decision = ALLOW): {
     async getAudit(query = {}) {
       calls.getAudit.push(query);
       return { data: [], hasMore: false, nextCursor: null };
+    },
+    async getMandate() {
+      calls.getMandate += 1;
+      return [];
     },
     async getUsage(query) {
       calls.getUsage.push(query);
@@ -514,6 +520,29 @@ describe("memory verbs", () => {
     expect(res.isError).toBe(true);
     expect(res.structuredContent?.["code"]).toBe("intent.malformed");
     expect(calls.memoryRemember).toHaveLength(0);
+  });
+});
+
+describe("get_mandate", () => {
+  test("delegates and needs no arguments", async () => {
+    const { client, calls } = fakeClient();
+    const tool = buildTools(client).find((t) => t.name === "get_mandate")!;
+    const res = await tool.handler({} as never);
+    expect(calls.getMandate).toBe(1);
+    // No live authority is an answer, not an error: an agent needs to learn it may spend
+    // nothing HERE, rather than by proposing a payment and being refused. It comes back as a
+    // successful empty result, never as a problem.
+    expect(res.structuredContent).toEqual({ result: [] });
+    expect(res.isError).toBeUndefined();
+  });
+
+  test("its description warns that an absent budget is unknown, not zero", () => {
+    // The one way a model can lose money with this tool is by reading an absent `remaining`
+    // as zero-spent and concluding it holds its whole budget at the moment it holds none.
+    const { client } = fakeClient();
+    const tool = buildTools(client).find((t) => t.name === "get_mandate")!;
+    expect(tool.description).toContain("ABSENT");
+    expect(tool.description.toLowerCase()).toContain("never zero");
   });
 });
 

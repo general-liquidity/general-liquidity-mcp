@@ -9,6 +9,7 @@ import type {
   Disclosure,
   GeneralLiquidity,
   Intent,
+  IntentQuery,
   Order,
   PageQuery,
   QuoteRequest,
@@ -43,6 +44,8 @@ interface Calls {
   getAudit: PageQuery[];
   getUsage: UsageQuery[];
   getMandate: number;
+  listIntents: IntentQuery[];
+  health: number;
 }
 
 const ALLOW: Decision = { outcome: "allow", reasons: [], mandateId: "m1" };
@@ -67,6 +70,8 @@ function fakeClient(decision: Decision = ALLOW): {
     getAudit: [],
     getUsage: [],
     getMandate: 0,
+    listIntents: [],
+    health: 0,
   };
   const client: GeneralLiquidity & Commerce = {
     async resolve(ref) {
@@ -146,6 +151,14 @@ function fakeClient(decision: Decision = ALLOW): {
     async getMandate() {
       calls.getMandate += 1;
       return [];
+    },
+    async listIntents(query = {}) {
+      calls.listIntents.push(query);
+      return { data: [], hasMore: false, nextCursor: null };
+    },
+    async health() {
+      calls.health += 1;
+      return { status: "ok" as const, version: "2026-07-22" };
     },
     async getUsage(query) {
       calls.getUsage.push(query);
@@ -543,6 +556,59 @@ describe("get_mandate", () => {
     const tool = buildTools(client).find((t) => t.name === "get_mandate")!;
     expect(tool.description).toContain("ABSENT");
     expect(tool.description.toLowerCase()).toContain("never zero");
+  });
+});
+
+describe("list_intents", () => {
+  test("delegates with no narrowing when called bare", async () => {
+    const { client, calls } = fakeClient();
+    const tool = buildTools(client).find((t) => t.name === "list_intents")!;
+    const res = await tool.handler({} as never);
+    expect(calls.listIntents).toEqual([{}]);
+    expect(res.structuredContent).toEqual({
+      result: { data: [], hasMore: false, nextCursor: null },
+    });
+    expect(res.isError).toBeUndefined();
+  });
+
+  test("passes status, cursor and limit through", async () => {
+    const { client, calls } = fakeClient();
+    const tool = buildTools(client).find((t) => t.name === "list_intents")!;
+    await tool.handler({ status: "pending", cursor: "c0", limit: 25 } as never);
+    expect(calls.listIntents).toEqual([{ status: "pending", cursor: "c0", limit: 25 }]);
+  });
+
+  test("an absent argument is omitted rather than sent as undefined", async () => {
+    // A key present with an undefined value would serialize into the query string on some
+    // clients and narrow the list to nothing.
+    const { client, calls } = fakeClient();
+    const tool = buildTools(client).find((t) => t.name === "list_intents")!;
+    await tool.handler({ status: "settled" } as never);
+    expect(Object.keys(calls.listIntents[0]!)).toEqual(["status"]);
+  });
+
+  test("a status outside the lifecycle is refused before it reaches the client", async () => {
+    const { client, calls } = fakeClient();
+    const tool = buildTools(client).find((t) => t.name === "list_intents")!;
+    const res = await tool.handler({ status: "parked" } as never);
+    expect(res.isError).toBe(true);
+    expect(calls.listIntents).toHaveLength(0);
+  });
+
+  test("its description points at the recovery it exists for", () => {
+    // The tool is worth its schema tokens only if a model reaches for it holding an
+    // approval.pending problem whose intent id it no longer has.
+    const { client } = fakeClient();
+    const tool = buildTools(client).find((t) => t.name === "list_intents")!;
+    expect(tool.description).toContain("approval.pending");
+    expect(tool.description).toContain("pending");
+  });
+
+  test("it is a read: no approve or release path hides behind it", () => {
+    const { client } = fakeClient();
+    const tool = buildTools(client).find((t) => t.name === "list_intents")!;
+    expect(READ_TOOL_NAMES).toContain("list_intents");
+    expect(tool.description.toLowerCase()).toContain("read-only");
   });
 });
 

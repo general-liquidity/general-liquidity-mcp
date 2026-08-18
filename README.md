@@ -1,6 +1,6 @@
 # `@general-liquidity/mcp`
 
-A curated MCP server that projects the General Liquidity surface as fifteen
+A curated MCP server that projects the General Liquidity surface as sixteen
 task-shaped tools in four groups: money/identity, commerce, memory, and
 read-back. It is
 deliberately **not** a 1:1 dump of every REST endpoint, which would overrun an
@@ -59,9 +59,17 @@ Read-back over the calling principal's own record:
 - `get_job` — the lifecycle of one intent by its idempotency key.
 - `get_job_events` — that intent's signed, hash-linked audit events.
 - `get_audit` — the audit trail across every intent.
+- `list_intents` — the caller's own intents, newest first, optionally narrowed to one
+  status.
 - `get_mandate` — the live spend authority covering the caller: caps, expiry, when the
   period resets, and how much of each has been drawn.
 - `get_usage` — metered call counts over a window.
+
+`list_intents` is the one to reach for holding an `approval.pending` problem whose intent id
+was not kept. A `confirm` verdict parks the intent and returns that id ONCE, so
+`status: "pending"` is how the parked payment is found again rather than paging the whole
+audit trail for something the agent cannot name. Each row carries the same lifecycle `get_job`
+returns, including the `pending.challenge` an operator approval binds to.
 
 `get_mandate` is the one an agent should reach for BEFORE committing to anything
 metered or long-running, rather than discovering a ceiling by being refused. Its
@@ -78,6 +86,12 @@ tool. Those routes live in a disjoint authorization domain — the detached
 `GL-Operator` ed25519 credential — which the injected agent client cannot mint.
 Exposing them would either be dead weight or, worse, would let an agent release
 its own parked spend. An agent that can approve its own payment has no gate.
+
+There is also no `health` tool, for a different reason: it would not work when it mattered.
+`GET /health` separates a deployment that is down from one that refused the credential, but an
+agent reaches this server over the same transport it would use to ask, so a stack that cannot
+answer cannot answer that either. The question belongs to the host process, and `gl health`
+answers it there.
 
 ## Structured failures
 

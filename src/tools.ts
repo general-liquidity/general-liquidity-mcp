@@ -340,6 +340,11 @@ const pageShape = {
   limit: z.number().optional(),
 };
 
+const intentsShape = {
+  status: z.enum(["pending", "settled", "denied", "failed"]).optional(),
+  ...pageShape,
+};
+
 const usageShape = {
   since: z.string(),
   until: z.string(),
@@ -524,7 +529,7 @@ export function buildTools(client: GeneralLiquidity & Commerce): AnyToolDef[] {
     },
 
     // Read-back. An agent that submitted an intent has to be able to see what became of it
-    // and what it has spent, without an operator in the loop. All four are reads over the
+    // and what it has spent, without an operator in the loop. Every one is a read over the
     // calling principal's own record: they mutate nothing and grant nothing.
     {
       name: "get_job",
@@ -563,6 +568,23 @@ export function buildTools(client: GeneralLiquidity & Commerce): AnyToolDef[] {
           const a = z.object(pageShape).parse(args);
           return ok(
             await client.getAudit({
+              ...(a.cursor !== undefined ? { cursor: a.cursor } : {}),
+              ...(a.limit !== undefined ? { limit: a.limit } : {}),
+            }),
+          );
+        }),
+    },
+    {
+      name: "list_intents",
+      description:
+        'List your own intents, newest first, cursor-paginated and optionally narrowed to one `status` (pending · settled · denied · failed). Reach for this when you know you submitted a payment but no longer hold its id: a `confirm` verdict parks the intent and returns that id ONCE, on the approval.pending problem, so `status: "pending"` is how a parked payment is found again instead of paging the whole audit trail for something you cannot name. Each row carries the same lifecycle `get_job` returns, including the `pending.challenge` an operator approval binds to. Newest first, because the intent you are looking for is almost always the one you just made. Read-only: it releases nothing and approves nothing.',
+      inputSchema: intentsShape,
+      handler: (args) =>
+        guarded(async () => {
+          const a = z.object(intentsShape).parse(args);
+          return ok(
+            await client.listIntents({
+              ...(a.status !== undefined ? { status: a.status } : {}),
               ...(a.cursor !== undefined ? { cursor: a.cursor } : {}),
               ...(a.limit !== undefined ? { limit: a.limit } : {}),
             }),
@@ -621,6 +643,7 @@ export const READ_TOOL_NAMES = [
   "get_job",
   "get_job_events",
   "get_audit",
+  "list_intents",
   "get_mandate",
   "get_usage",
 ] as const;

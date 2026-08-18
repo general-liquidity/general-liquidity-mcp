@@ -1,7 +1,8 @@
 # `@general-liquidity/mcp`
 
-A curated MCP server that projects the General Liquidity surface as twelve
-task-shaped tools in three groups: money/identity, memory, and read-back. It is
+A curated MCP server that projects the General Liquidity surface as fifteen
+task-shaped tools in four groups: money/identity, commerce, memory, and
+read-back. It is
 deliberately **not** a 1:1 dump of every REST endpoint, which would overrun an
 agent's token budget. The tool names *are* the surface verbs, and there is no
 `settle` or `grant` tool: settlement stays behind the client, and mandate

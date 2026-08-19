@@ -86,6 +86,9 @@ export type ProblemCode =
   // `rate_limited` and means the opposite thing: waiting does not clear it inside any window
   // an agent is willing to wait out.
   | "quota_exceeded"
+  // Another attempt under this idempotency key has not terminated. The server refused to run
+  // the money path twice for one key, so this arriving means the protection worked.
+  | "idempotency.in_flight"
   | "internal";
 
 /**
@@ -154,6 +157,7 @@ const TITLES: Record<ProblemCode, string> = {
   payload_too_large: "Request body too large",
   rate_limited: "Rate limit exceeded",
   quota_exceeded: "Plan allowance exhausted",
+  "idempotency.in_flight": "Idempotency key already in flight",
   internal: "Internal error",
 };
 
@@ -197,6 +201,7 @@ const STATUS: Record<ProblemCode, number> = {
   // machine-readable backoff instead of a dead end.
   rate_limited: 429,
   quota_exceeded: 429,
+  "idempotency.in_flight": 409,
   internal: 500,
 };
 
@@ -233,6 +238,9 @@ const ACTIONS: Record<ProblemCode, ErrorAction> = {
   // An agent cannot buy itself a bigger plan any more than it can approve its own parked
   // payment: raising the ceiling is an operator act on a separate authority.
   quota_exceeded: "escalate-to-human",
+  // Waiting genuinely changes this one: the in-flight attempt terminates and the identical
+  // resubmission replays its result. Never retry under a NEW key, which would be a new payment.
+  "idempotency.in_flight": "retry-as-is",
   internal: "retry-as-is",
 };
 

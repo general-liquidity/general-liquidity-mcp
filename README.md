@@ -1,6 +1,6 @@
 # `@general-liquidity/mcp`
 
-A curated MCP server that projects the General Liquidity surface as sixteen
+A curated MCP server that projects the General Liquidity surface as seventeen
 task-shaped tools in four groups: money/identity, commerce, memory, and
 read-back. It is
 deliberately **not** a 1:1 dump of every REST endpoint, which would overrun an
@@ -22,6 +22,10 @@ Money and identity:
   CAIP) into one identity with its accepted rails and trust signals.
 - `pay` — submit a signed Intent to move value. The gate decides; on allow it
   settles on the right rail and returns a Receipt.
+- `simulate` — ask what the gate would decide, without doing any of it. Settles
+  nothing, writes no audit entry, and does not consume the idempotency key, so
+  simulating a payment never prevents making it. `authorizes` is always false:
+  an `allow` here is an answer, not a grant.
 - `verify` — check a counterparty's signed disclosure against policy and return a
   Decision.
 - `disclose` — produce this agent's own signed disclosure: what it is and what it

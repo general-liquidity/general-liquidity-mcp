@@ -128,6 +128,7 @@ const CODE_IS_KNOWN: Record<ProblemCode, true> = {
   payload_too_large: true,
   rate_limited: true,
   quota_exceeded: true,
+  "idempotency.in_flight": true,
   internal: true,
 };
 
@@ -185,6 +186,7 @@ const ERROR_NAME_CODE: Record<string, ProblemCode> = {
   AuthError: "principal.unauthorized",
   RateLimitError: "rate_limited",
   QuotaExceededError: "quota_exceeded",
+  IdempotencyInFlightError: "idempotency.in_flight",
   ServerError: "internal",
 };
 

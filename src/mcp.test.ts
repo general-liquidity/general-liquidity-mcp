@@ -45,6 +45,7 @@ interface Calls {
   getUsage: UsageQuery[];
   getMandate: number;
   listIntents: IntentQuery[];
+  simulate: Intent[];
   health: number;
 }
 
@@ -71,6 +72,7 @@ function fakeClient(decision: Decision = ALLOW): {
     getUsage: [],
     getMandate: 0,
     listIntents: [],
+    simulate: [],
     health: 0,
   };
   const client: GeneralLiquidity & Commerce = {
@@ -151,6 +153,15 @@ function fakeClient(decision: Decision = ALLOW): {
     async getMandate() {
       calls.getMandate += 1;
       return [];
+    },
+    async simulate(intent) {
+      calls.simulate.push(intent);
+      return {
+        outcome: decision.outcome,
+        reasons: decision.reasons,
+        evaluatedAt: "2026-08-19T00:00:00Z",
+        authorizes: false as const,
+      };
     },
     async listIntents(query = {}) {
       calls.listIntents.push(query);
@@ -738,5 +749,28 @@ describe("read-back verbs", () => {
     expect(res.isError).toBe(true);
     expect(res.structuredContent?.["code"]).toBe("intent.malformed");
     expect(calls.getUsage).toHaveLength(0);
+  });
+});
+
+describe("simulate", () => {
+  test("delegates to the client and never reaches pay", async () => {
+    const { client, calls } = fakeClient();
+    const res = await tool(client, "simulate").handler({ intent: wireIntent } as never);
+    expect(calls.simulate).toHaveLength(1);
+    expect(calls.pay).toHaveLength(0);
+    expect(res.isError).toBeUndefined();
+  });
+
+  test("its description warns that an allow is not permission", () => {
+    // The one way to misuse this tool is to read its verdict as a grant, so the warning has to
+    // be in the description a model actually reads, not only in the response body.
+    const { client } = fakeClient();
+    const t = buildTools(client).find((x) => x.name === "simulate")!;
+    expect(t.description).toContain("authorizes");
+    expect(t.description.toLowerCase()).toContain("not permission");
+  });
+
+  test("it is listed among the money and identity verbs", () => {
+    expect(TOOL_NAMES).toContain("simulate");
   });
 });

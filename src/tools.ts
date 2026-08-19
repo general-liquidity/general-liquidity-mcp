@@ -402,6 +402,17 @@ export function buildTools(client: GeneralLiquidity & Commerce): AnyToolDef[] {
         }),
     },
     {
+      name: "simulate",
+      description:
+        "Ask what the gate WOULD decide for an Intent, without doing any of it. Reach for this before committing to a payment you are not sure will be permitted: `get_mandate` shows the caps and nothing else, so a deny-list hit, a risk tier or a velocity refusal stays invisible until you are refused by one. It settles nothing, writes nothing to the audit trail, and does NOT consume the idempotency key, so simulating a payment never prevents making it. CRITICAL: `authorizes` is always false and an `allow` here is NOT permission. Nothing was reserved, and the state behind the answer can change before you submit, so the gate is re-run at settlement regardless. Treating this verdict as a grant is the one way to misuse the tool.",
+      inputSchema: { intent: intentShape },
+      handler: (args) =>
+        guarded(async () => {
+          const { intent } = z.object({ intent: intentShape }).parse(args);
+          return ok(await client.simulate(toIntent(intent)));
+        }),
+    },
+    {
       name: "verify",
       description:
         "Check a counterparty's signed disclosure against policy (identity + provenance + enforcement proof), returning a Decision. The Decision's `checks` name every policy predicate the gate evaluated and whether each passed; branch on those ids, not on the prose in `reasons`.",
@@ -619,7 +630,7 @@ export function buildTools(client: GeneralLiquidity & Commerce): AnyToolDef[] {
 }
 
 /** The money + identity verbs. Stable, small, task-shaped. */
-export const TOOL_NAMES = ["resolve", "pay", "verify", "disclose"] as const;
+export const TOOL_NAMES = ["resolve", "pay", "simulate", "verify", "disclose"] as const;
 
 /**
  * The commerce verbs. Registered on every server even though the tier is opt-in per
